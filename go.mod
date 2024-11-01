@@ -1,8 +1,11 @@
-module github.com/tmc/langgraphgo
+module github.com/alberrttt/langgraphgo
 
 go 1.23.2
 
-require github.com/tmc/langchaingo v0.1.12
+require (
+	github.com/tmc/langchaingo v0.1.12
+
+)
 
 require (
 	github.com/dlclark/regexp2 v1.11.4 // indirect

@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/alberrttt/langgraphgo/graph"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
-	"github.com/tmc/langgraphgo/graph"
 )
 
 func ExampleMessageGraph() {
