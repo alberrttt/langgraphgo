@@ -8,7 +8,6 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
-	"github.com/tmc/langchaingo/schema"
 	"github.com/tmc/langgraphgo/graph"
 )
 
@@ -18,19 +17,20 @@ func ExampleMessageGraph() {
 		panic(err)
 	}
 
-	g := graph.NewMessageGraph()
+	g := graph.NewStateGraph[graph.MessageState]()
 
-	g.AddNode("oracle", func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-		r, err := model.GenerateContent(ctx, state, llms.WithTemperature(0.0))
+	g.AddNode("oracle", func(ctx context.Context, state *graph.MessageState) error {
+		r, err := model.GenerateContent(ctx, state.Messages, llms.WithTemperature(0.0))
 		if err != nil {
-			return nil, err
+			return err
 		}
-		return append(state,
-			llms.TextParts(schema.ChatMessageTypeAI, r.Choices[0].Content),
-		), nil
+		state.Messages = append(state.Messages,
+			llms.TextParts(llms.ChatMessageTypeAI, r.Choices[0].Content),
+		)
+		return nil
 	})
-	g.AddNode(graph.END, func(_ context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-		return state, nil
+	g.AddNode(graph.END, func(_ context.Context, state *graph.MessageState) error {
+		return nil
 	})
 
 	g.AddEdge("oracle", graph.END)
@@ -43,14 +43,13 @@ func ExampleMessageGraph() {
 
 	ctx := context.Background()
 	// Let's run it!
-	res, err := runnable.Invoke(ctx, []llms.MessageContent{
-		llms.TextParts(schema.ChatMessageTypeHuman, "What is 1 + 1?"),
-	})
+	msgs := graph.NewMessageState()
+	err = runnable.Invoke(ctx, &msgs)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(res)
+	fmt.Println(msgs)
 
 	// Output:
 	// [{human [{What is 1 + 1?}]} {ai [{1 + 1 equals 2.}]}]
@@ -60,40 +59,42 @@ func TestMessageGraph(t *testing.T) {
 	t.Parallel()
 	testCases := []struct {
 		name           string
-		buildGraph     func() *graph.MessageGraph
+		buildGraph     func() *graph.StateGraph[graph.MessageState]
 		inputMessages  []llms.MessageContent
 		expectedOutput []llms.MessageContent
 		expectedError  error
 	}{
 		{
 			name: "Simple graph",
-			buildGraph: func() *graph.MessageGraph {
-				g := graph.NewMessageGraph()
-				g.AddNode("node1", func(_ context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-					return append(state, llms.TextParts(schema.ChatMessageTypeAI, "Node 1")), nil
+			buildGraph: func() *graph.StateGraph[graph.MessageState] {
+				g := graph.NewStateGraph[graph.MessageState]()
+				g.AddNode("node1", func(_ context.Context, state *graph.MessageState) error {
+					state.Messages = append(state.Messages, llms.TextParts(llms.ChatMessageTypeAI, "Node 1"))
+					return nil
 				})
-				g.AddNode("node2", func(_ context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-					return append(state, llms.TextParts(schema.ChatMessageTypeAI, "Node 2")), nil
+				g.AddNode("node2", func(_ context.Context, state *graph.MessageState) error {
+					state.Messages = append(state.Messages, llms.TextParts(llms.ChatMessageTypeAI, "Node 2"))
+					return nil
 				})
 				g.AddEdge("node1", "node2")
 				g.AddEdge("node2", graph.END)
 				g.SetEntryPoint("node1")
 				return g
 			},
-			inputMessages: []llms.MessageContent{llms.TextParts(schema.ChatMessageTypeHuman, "Input")},
+			inputMessages: []llms.MessageContent{llms.TextParts(llms.ChatMessageTypeHuman, "Input")},
 			expectedOutput: []llms.MessageContent{
-				llms.TextParts(schema.ChatMessageTypeHuman, "Input"),
-				llms.TextParts(schema.ChatMessageTypeAI, "Node 1"),
-				llms.TextParts(schema.ChatMessageTypeAI, "Node 2"),
+				llms.TextParts(llms.ChatMessageTypeHuman, "Input"),
+				llms.TextParts(llms.ChatMessageTypeAI, "Node 1"),
+				llms.TextParts(llms.ChatMessageTypeAI, "Node 2"),
 			},
 			expectedError: nil,
 		},
 		{
 			name: "Entry point not set",
-			buildGraph: func() *graph.MessageGraph {
-				g := graph.NewMessageGraph()
-				g.AddNode("node1", func(_ context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-					return state, nil
+			buildGraph: func() *graph.StateGraph[graph.MessageState] {
+				g := graph.NewStateGraph[graph.MessageState]()
+				g.AddNode("node1", func(_ context.Context, state *graph.MessageState) error {
+					return nil
 				})
 				return g
 			},
@@ -101,10 +102,10 @@ func TestMessageGraph(t *testing.T) {
 		},
 		{
 			name: "Node not found",
-			buildGraph: func() *graph.MessageGraph {
-				g := graph.NewMessageGraph()
-				g.AddNode("node1", func(_ context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-					return state, nil
+			buildGraph: func() *graph.StateGraph[graph.MessageState] {
+				g := graph.NewStateGraph[graph.MessageState]()
+				g.AddNode("node1", func(_ context.Context, state *graph.MessageState) error {
+					return nil
 				})
 				g.AddEdge("node1", "node2")
 				g.SetEntryPoint("node1")
@@ -114,10 +115,10 @@ func TestMessageGraph(t *testing.T) {
 		},
 		{
 			name: "No outgoing edge",
-			buildGraph: func() *graph.MessageGraph {
-				g := graph.NewMessageGraph()
-				g.AddNode("node1", func(_ context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-					return state, nil
+			buildGraph: func() *graph.StateGraph[graph.MessageState] {
+				g := graph.NewStateGraph[graph.MessageState]()
+				g.AddNode("node1", func(_ context.Context, state *graph.MessageState) error {
+					return nil
 				})
 				g.SetEntryPoint("node1")
 				return g
@@ -126,10 +127,10 @@ func TestMessageGraph(t *testing.T) {
 		},
 		{
 			name: "Error in node function",
-			buildGraph: func() *graph.MessageGraph {
-				g := graph.NewMessageGraph()
-				g.AddNode("node1", func(_ context.Context, _ []llms.MessageContent) ([]llms.MessageContent, error) {
-					return nil, errors.New("node error")
+			buildGraph: func() *graph.StateGraph[graph.MessageState] {
+				g := graph.NewStateGraph[graph.MessageState]()
+				g.AddNode("node1", func(_ context.Context, _ *graph.MessageState) error {
+					return errors.New("node error")
 				})
 				g.AddEdge("node1", graph.END)
 				g.SetEntryPoint("node1")
@@ -151,7 +152,8 @@ func TestMessageGraph(t *testing.T) {
 				return
 			}
 
-			output, err := runnable.Invoke(context.Background(), tc.inputMessages)
+			output := &graph.MessageState{Messages: tc.inputMessages}
+			err = runnable.Invoke(context.Background(), output)
 			if err != nil {
 				if tc.expectedError == nil || err.Error() != tc.expectedError.Error() {
 					t.Fatalf("unexpected invoke error: '%v', expected '%v'", err, tc.expectedError)
@@ -163,11 +165,11 @@ func TestMessageGraph(t *testing.T) {
 				t.Fatalf("expected error %v, but got nil", tc.expectedError)
 			}
 
-			if len(output) != len(tc.expectedOutput) {
-				t.Fatalf("expected output length %d, but got %d", len(tc.expectedOutput), len(output))
+			if len(output.Messages) != len(tc.expectedOutput) {
+				t.Fatalf("expected output length %d, but got %d", len(tc.expectedOutput), len(output.Messages))
 			}
 
-			for i, msg := range output {
+			for i, msg := range output.Messages {
 				got := fmt.Sprint(msg)
 				expected := fmt.Sprint(tc.expectedOutput[i])
 				if got != expected {

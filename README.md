@@ -17,7 +17,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
-	"github.com/tmc/langchaingo/schema"
+	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langgraphgo/graph"
 )
 
@@ -27,7 +27,7 @@ func main() {
 		panic(err)
 	}
 
-	g := graph.NewMessageGraph()
+	g := graph.NewStateGraph[graph.MessageState]()
 
 	g.AddNode("oracle", func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
 		r, err := model.GenerateContent(ctx, state, llms.WithTemperature(0.0))
@@ -35,7 +35,7 @@ func main() {
 			return nil, err
 		}
 		return append(state,
-			llms.TextParts(schema.ChatMessageTypeAI, r.Choices[0].Content),
+			llms.TextParts(llms.ChatMessageTypeAI, r.Choices[0].Content),
 		), nil
 
 	})
@@ -53,14 +53,17 @@ func main() {
 
 	ctx := context.Background()
 	// Let's run it!
-	res, err := runnable.Invoke(ctx, []llms.MessageContent{
-		llms.TextParts(schema.ChatMessageTypeHuman, "What is 1 + 1?"),
-	})
+	msgs := graph.MessageState{
+		[]llms.MessageContent{
+			Messages: llms.TextParts(llms.ChatMessageTypeHuman, "What is 1 + 1?"),
+		}
+	}
+	err := runnable.Invoke(ctx, msgs)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(res)
+	fmt.Println(msgs)
 
 	// Output:
 	// [{human [{What is 1 + 1?}]} {ai [{1 + 1 equals 2.}]}]
